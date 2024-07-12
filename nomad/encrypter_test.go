@@ -72,7 +72,7 @@ func TestEncrypter_LoadSave(t *testing.T) {
 
 			// startup code path
 			gotKey, err := encrypter.loadKeyFromStore(
-				filepath.Join(tmpDir, key.Meta.KeyID+".nks.json"))
+				filepath.Join(tmpDir, key.Meta.KeyID+".aead.nks.json"))
 			must.NoError(t, err)
 			must.NoError(t, encrypter.addCipher(gotKey))
 			must.Greater(t, 0, len(gotKey.RSAKey))
@@ -83,6 +83,26 @@ func TestEncrypter_LoadSave(t *testing.T) {
 			must.Greater(t, 0, len(active.rootKey.RSAKey))
 		})
 	}
+
+	t.Run("legacy aead wrapper", func(t *testing.T) {
+		key, err := structs.NewRootKey(structs.EncryptionAlgorithmAES256GCM)
+		must.NoError(t, err)
+		kekWrapper, err := encrypter.encryptDEK(key, &structs.KEKProviderConfig{})
+		kekWrapper.Provider = ""
+		kekWrapper.ProviderID = ""
+		buf, err := json.Marshal(kekWrapper)
+		must.NoError(t, err)
+
+		path := filepath.Join(tmpDir, key.Meta.KeyID+".nks.json")
+		err = os.WriteFile(path, buf, 0o600)
+		must.NoError(t, err)
+
+		gotKey, err := encrypter.loadKeyFromStore(path)
+		must.NoError(t, err)
+		must.NoError(t, encrypter.addCipher(gotKey))
+		must.Greater(t, 0, len(gotKey.RSAKey))
+	})
+
 }
 
 // TestEncrypter_Restore exercises the entire reload of a keystore,
@@ -251,7 +271,7 @@ func TestEncrypter_KeyringReplication(t *testing.T) {
 	keyID1 := listResp.Keys[0].KeyID
 
 	keyPath := filepath.Join(leader.GetConfig().DataDir, "keystore",
-		keyID1+nomadKeystoreExtension)
+		keyID1+".aead.nks.json")
 	_, err := os.Stat(keyPath)
 	require.NoError(t, err, "expected key to be found in leader keystore")
 
@@ -262,7 +282,7 @@ func TestEncrypter_KeyringReplication(t *testing.T) {
 		return func() bool {
 			for _, srv := range servers {
 				keyPath := filepath.Join(srv.GetConfig().DataDir, "keystore",
-					keyID+nomadKeystoreExtension)
+					keyID+".aead.nks.json")
 				if _, err := os.Stat(keyPath); err != nil {
 					return false
 				}
@@ -300,7 +320,7 @@ func TestEncrypter_KeyringReplication(t *testing.T) {
 	require.NotNil(t, getResp.Key, "expected key to be found on leader")
 
 	keyPath = filepath.Join(leader.GetConfig().DataDir, "keystore",
-		keyID2+nomadKeystoreExtension)
+		keyID2+".aead.nks.json")
 	_, err = os.Stat(keyPath)
 	require.NoError(t, err, "expected key to be found in leader keystore")
 

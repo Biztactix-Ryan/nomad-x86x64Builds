@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
+	"maps"
 	"net/url"
 	"time"
 
@@ -84,6 +85,43 @@ type RootKeyMeta struct {
 	CreateIndex uint64
 	ModifyIndex uint64
 	State       RootKeyState
+}
+
+// KEKProviderConfig is the server configuration for an external KMS provider
+// the server will use as a Key Encryption Key (KEK) for encrypting/decrypting
+// the DEK.
+type KEKProviderConfig struct {
+	Provider string
+	Name     string
+	Active   bool
+	Config   map[string]string
+}
+
+func (c *KEKProviderConfig) Copy() *KEKProviderConfig {
+	return &KEKProviderConfig{
+		Provider: c.Provider,
+		Active:   c.Active,
+		Name:     c.Name,
+		Config:   maps.Clone(c.Config),
+	}
+}
+
+// Merge is used to merge two configurations. Note that Provider and Name should
+// always be identical before we merge.
+func (c *KEKProviderConfig) Merge(o *KEKProviderConfig) *KEKProviderConfig {
+	result := c.Copy()
+	result.Active = o.Active
+	for k, v := range o.Config {
+		result.Config[k] = v
+	}
+	return result
+}
+
+func (c *KEKProviderConfig) ID() string {
+	if c.Name == "" {
+		return c.Provider
+	}
+	return c.Provider + "." + c.Name
 }
 
 // RootKeyState enum describes the lifecycle of a root key.
@@ -192,13 +230,16 @@ func (rkm *RootKeyMeta) Validate() error {
 }
 
 // KeyEncryptionKeyWrapper is the struct that gets serialized for the on-disk
-// KMS wrapper. This struct includes the server-specific key-wrapping key and
-// should never be sent over RPC.
+// KMS wrapper. When using the AEAD provider, this struct includes the
+// server-specific key-wrapping key. This struct should never be sent over RPC
+// or written to Raft.
 type KeyEncryptionKeyWrapper struct {
 	Meta                       *RootKeyMeta
 	EncryptedDataEncryptionKey []byte `json:"DEK"`
 	EncryptedRSAKey            []byte `json:"RSAKey"`
-	KeyEncryptionKey           []byte `json:"KEK"`
+	KeyEncryptionKey           []byte `json:"KEK,omitempty"`
+	Provider                   string `json:"provider,omitempty"`
+	ProviderID                 string `json:"provider_id,omitempty"`
 }
 
 // EncryptionAlgorithm chooses which algorithm is used for
@@ -261,7 +302,7 @@ type KeyringGetRootKeyResponse struct {
 
 // KeyringUpdateRootKeyMetaRequest is used internally for key
 // replication so that we have a request wrapper for writing the
-// metadata to the FSM without including the key material
+// metadata to the FSM without including the key material.
 type KeyringUpdateRootKeyMetaRequest struct {
 	RootKeyMeta *RootKeyMeta
 	Rekey       bool

@@ -714,6 +714,8 @@ type ServerConfig struct {
 	// issuer. Third parties such as AWS IAM OIDC Provider expect the issuer to
 	// be a publically accessible HTTPS URL signed by a trusted well-known CA.
 	OIDCIssuer string `hcl:"oidc_issuer"`
+
+	KEKProviders []*structs.KEKProviderConfig `hcl:"keyring"`
 }
 
 func (s *ServerConfig) Copy() *ServerConfig {
@@ -743,6 +745,7 @@ func (s *ServerConfig) Copy() *ServerConfig {
 	ns.JobDefaultPriority = pointer.Copy(s.JobDefaultPriority)
 	ns.JobMaxPriority = pointer.Copy(s.JobMaxPriority)
 	ns.JobTrackedVersions = pointer.Copy(s.JobTrackedVersions)
+	ns.KEKProviders = helper.CopySlice(s.KEKProviders)
 	return &ns
 }
 
@@ -1424,6 +1427,7 @@ func DefaultConfig() *Config {
 			},
 			JobMaxSourceSize:   pointer.Of("1M"),
 			JobTrackedVersions: pointer.Of(structs.JobDefaultTrackedVersions),
+			KEKProviders:       []*structs.KEKProviderConfig{{Provider: "aead", Active: true}},
 		},
 		ACL: &ACLConfig{
 			Enabled:   false,
@@ -1741,6 +1745,37 @@ func mergeConsulConfigs(left, right []*config.ConsulConfig) []*config.ConsulConf
 
 	results = doMerge(results, left)
 	results = doMerge(results, right)
+	return results
+}
+
+func mergeKEKProviderConfigs(left, right []*structs.KEKProviderConfig) []*structs.KEKProviderConfig {
+	if len(left) == 0 {
+		return right
+	}
+	if len(right) == 0 {
+		return left
+	}
+	results := []*structs.KEKProviderConfig{}
+	doMerge := func(dstConfigs, srcConfigs []*structs.KEKProviderConfig) []*structs.KEKProviderConfig {
+		for _, src := range srcConfigs {
+			var found bool
+			for i, dst := range dstConfigs {
+				if dst.Provider == src.Provider && dst.Name == src.Name {
+					dstConfigs[i] = dst.Merge(src)
+					found = true
+					break
+				}
+			}
+			if !found {
+				dstConfigs = append(dstConfigs, src)
+			}
+		}
+		return dstConfigs
+	}
+
+	results = doMerge(results, left)
+	results = doMerge(results, right)
+
 	return results
 }
 
@@ -2236,6 +2271,8 @@ func (s *ServerConfig) Merge(b *ServerConfig) *ServerConfig {
 	result.RetryJoin = make([]string, 0, len(s.RetryJoin)+len(b.RetryJoin))
 	result.RetryJoin = append(result.RetryJoin, s.RetryJoin...)
 	result.RetryJoin = append(result.RetryJoin, b.RetryJoin...)
+
+	result.KEKProviders = mergeKEKProviderConfigs(result.KEKProviders, b.KEKProviders)
 
 	return &result
 }
