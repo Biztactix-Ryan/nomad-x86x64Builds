@@ -21,15 +21,14 @@ import (
 
 	"github.com/go-jose/go-jose/v3"
 	"github.com/go-jose/go-jose/v3/jwt"
-	log "github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/go-hclog"
 	kms "github.com/hashicorp/go-kms-wrapping/v2"
 	"github.com/hashicorp/go-kms-wrapping/v2/aead"
-	"golang.org/x/time/rate"
-
 	"github.com/hashicorp/nomad/helper"
 	"github.com/hashicorp/nomad/helper/crypto"
 	"github.com/hashicorp/nomad/helper/joseutil"
 	"github.com/hashicorp/nomad/nomad/structs"
+	"golang.org/x/time/rate"
 )
 
 const nomadKeystoreExtension = ".nks.json"
@@ -337,16 +336,16 @@ func (e *Encrypter) addCipher(rootKey *structs.RootKey) error {
 	return nil
 }
 
-// GetKey retrieves the key material by ID from the keyring
-func (e *Encrypter) GetKey(keyID string) ([]byte, []byte, error) {
+// GetKey retrieves the key material by ID from the keyring.
+func (e *Encrypter) GetKey(keyID string) (*structs.RootKey, error) {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
 
 	keyset, err := e.keysetByIDLocked(keyID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return keyset.rootKey.Key, keyset.rootKey.RSAKey, nil
+	return keyset.rootKey, nil
 }
 
 // activeKeySetLocked returns the keyset that belongs to the key marked as
@@ -528,7 +527,7 @@ func (e *Encrypter) newKMSWrapper(keyID string, kek []byte) (kms.Wrapper, error)
 type KeyringReplicator struct {
 	srv       *Server
 	encrypter *Encrypter
-	logger    log.Logger
+	logger    hclog.Logger
 	stopFn    context.CancelFunc
 }
 
@@ -582,7 +581,7 @@ func (krr *KeyringReplicator) run(ctx context.Context) {
 				}
 
 				keyMeta := raw.(*structs.RootKeyMeta)
-				if key, _, err := krr.encrypter.GetKey(keyMeta.KeyID); err == nil && len(key) > 0 {
+				if key, err := krr.encrypter.GetKey(keyMeta.KeyID); err == nil && len(key.Key) > 0 {
 					// the key material is immutable so if we've already got it
 					// we can move on to the next key
 					continue
