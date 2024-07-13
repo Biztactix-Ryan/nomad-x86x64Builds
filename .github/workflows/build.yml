@@ -1,4 +1,4 @@
-name: Build Nomad for Windows
+name: Build Nomad for Windows x64
 
 on:
   push:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   get-go-version:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     outputs:
       go-version: ${{ steps.get-go-version.outputs.go-version }}
     steps:
@@ -38,7 +38,7 @@ jobs:
           echo "go-version=$(cat .go-version)" >> "$GITHUB_OUTPUT"
 
   get-product-version:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     outputs:
       product-version: ${{ steps.get-product-version.outputs.product-version }}
     steps:
@@ -54,12 +54,7 @@ jobs:
   build-windows:
     needs: [get-go-version, get-product-version]
     runs-on: windows-latest
-    strategy:
-      matrix:
-        goarch: ["386", "amd64"]
-      fail-fast: true
-
-    name: Go ${{ needs.get-go-version.outputs.go-version }} Windows ${{ matrix.goarch }} build
+    name: Go ${{ needs.get-go-version.outputs.go-version }} Windows x64 build
 
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +75,7 @@ jobs:
           cache-dependency-path: "ui/yarn.lock"
 
       - name: Install Yarn
-        run: |
-          npm install -g yarn
+        run: npm install -g yarn
 
       - name: Build prerelease
         run: make prerelease
@@ -90,18 +84,18 @@ jobs:
       - name: Build
         env:
           GOOS: windows
-          GOARCH: ${{ matrix.goarch }}
+          GOARCH: amd64
           GO_TAGS: ${{ env.GO_TAGS }}
           CGO_ENABLED: 1
         run: |
           go clean -cache
-          make pkg/windows_${{ matrix.goarch }}.zip
-          mv pkg/windows_${{ matrix.goarch }}.zip ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_${{ matrix.goarch }}.zip
+          make pkg/windows_amd64.zip
+          mv pkg/windows_amd64.zip ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_amd64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_${{ matrix.goarch }}.zip
-          path: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_${{ matrix.goarch }}.zip
+          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_amd64.zip
+          path: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_amd64.zip
 
 permissions:
   contents: read
