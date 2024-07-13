@@ -1,4 +1,4 @@
-name: build
+name: Build Nomad for Windows
 
 on:
   push:
@@ -28,69 +28,45 @@ jobs:
     outputs:
       go-version: ${{ steps.get-go-version.outputs.go-version }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.build-ref }}
       - name: Determine Go version
         id: get-go-version
-        # We use .go-version as our source of truth for current Go
-        # version, because "goenv" can react to it automatically.
-        run: |-
+        run: |
           echo "Building with Go $(cat .go-version)"
           echo "go-version=$(cat .go-version)" >> "$GITHUB_OUTPUT"
+
   get-product-version:
     runs-on: ubuntu-20.04
     outputs:
       product-version: ${{ steps.get-product-version.outputs.product-version }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.build-ref }}
       - name: get product version
         id: get-product-version
-        run: |-
+        run: |
           make version
           echo "product-version=$(make version)" >> "$GITHUB_OUTPUT"
-  generate-metadata-file:
-    needs: get-product-version
-    runs-on: ubuntu-20.04
-    outputs:
-      filepath: ${{ steps.generate-metadata-file.outputs.filepath }}
-    steps:
-      - name: "Checkout directory"
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          ref: ${{ github.event.inputs.build-ref }}
-      - name: Generate metadata file
-        id: generate-metadata-file
-        uses: hashicorp/actions-generate-metadata@fdbc8803a0e53bcbb912ddeee3808329033d6357 # v1.1.1
-        with:
-          version: ${{ needs.get-product-version.outputs.product-version }}
-          product: ${{ env.PKG_NAME }}
-          repositoryOwner: "hashicorp"
-          sha: ${{ github.event.inputs.build-ref }}
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
-        with:
-          name: metadata.json
-          path: ${{ steps.generate-metadata-file.outputs.filepath }}
 
-  build-other:
+  build-windows:
     needs: [get-go-version, get-product-version]
-    runs-on: custom-linux-xxl-nomad-20.04
+    runs-on: windows-latest
     strategy:
       matrix:
-        goos: [windows]
-        goarch: ["amd64"]
+        goarch: ["386", "amd64"]
       fail-fast: true
 
-    name: Go ${{ needs.get-go-version.outputs.go-version }} ${{ matrix.goos }} ${{ matrix.goarch }} build
+    name: Go ${{ needs.get-go-version.outputs.go-version }} Windows ${{ matrix.goarch }} build
 
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.build-ref }}
       - name: Setup go
-        uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ needs.get-go-version.outputs.go-version }}
 
@@ -98,7 +74,7 @@ jobs:
         run: make deps
 
       - name: Setup node and yarn
-        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache-dependency-path: "ui/yarn.lock"
@@ -113,262 +89,19 @@ jobs:
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
+          GOOS: windows
           GOARCH: ${{ matrix.goarch }}
           GO_TAGS: ${{ env.GO_TAGS }}
           CGO_ENABLED: 1
         run: |
           go clean -cache
-          make pkg/${{ matrix.goos }}_${{ matrix.goarch }}.zip
-          mv pkg/${{ matrix.goos }}_${{ matrix.goarch }}.zip ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+          make pkg/windows_${{ matrix.goarch }}.zip
+          mv pkg/windows_${{ matrix.goarch }}.zip ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_${{ matrix.goarch }}.zip
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-          path: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-
-  build-linux:
-    needs: [get-go-version, get-product-version]
-    runs-on: custom-linux-xxl-nomad-20.04
-    strategy:
-      matrix:
-        goos: [linux]
-        goarch: ["arm64", "amd64"]
-      fail-fast: true
-
-    name: Go ${{ needs.get-go-version.outputs.go-version }} ${{ matrix.goos }} ${{ matrix.goarch }} build
-
-    steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          ref: ${{ github.event.inputs.build-ref }}
-      - name: Setup go
-        uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
-        with:
-          go-version: ${{ needs.get-go-version.outputs.go-version }}
-
-      - name: Build dependencies
-        run: make deps
-
-      - name: Setup node and yarn
-        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
-        with:
-          node-version: "18"
-          cache-dependency-path: "ui/yarn.lock"
-
-      - name: Install Yarn
-        run: |
-          npm install -g yarn
-
-      - name: Build prerelease
-        run: make prerelease
-        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.make-prerelease == 'true' }}
-
-      - name: Install Linux build utilties
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common
-          sudo apt-get update
-          sudo apt-get install -y \
-            binutils-aarch64-linux-gnu \
-            gcc-aarch64-linux-gnu
-
-      - name: Set gcc
-        run: |
-          if [ "${{ matrix.goarch }}" == "arm64" ]; then
-            echo "CC=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-          fi
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GO_TAGS: ${{ env.GO_TAGS }}
-          CGO_ENABLED: 1
-        run: |
-          go clean -cache
-          make pkg/${{ matrix.goos }}_${{ matrix.goarch }}.zip
-          mv pkg/${{ matrix.goos }}_${{ matrix.goarch }}.zip ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
-        with:
-          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-          path: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-
-      - name: Copy license file
-        env:
-          LICENSE_DIR: ".release/linux/package/usr/share/doc/${{ env.PKG_NAME }}"
-        run: |
-          mkdir -p "$LICENSE_DIR"
-          cp LICENSE "$LICENSE_DIR/LICENSE.txt"
-
-      - name: Package
-        uses: hashicorp/actions-packaging-linux@9a9ce398877672719e83026640662f3182931fde # v1.8.0
-        with:
-          name: ${{ env.PKG_NAME }}
-          description: "Nomad is an easy-to-use, flexible, and performant workload orchestrator that can deploy a mix of microservice, batch, containerized, and non-containerized applications."
-          arch: ${{ matrix.goarch }}
-          version: ${{ needs.get-product-version.outputs.product-version }}
-          maintainer: "HashiCorp"
-          homepage: "https://github.com/hashicorp/nomad"
-          license: "BUSL-1.1"
-          binary: "pkg/${{ matrix.goos }}_${{ matrix.goarch }}/${{ env.PKG_NAME }}"
-          deb_depends: "openssl"
-          rpm_depends: "openssl"
-          config_dir: ".release/linux/package/"
-          preinstall: ".release/linux/preinst"
-          postinstall: ".release/linux/postinst"
-          postremove: ".release/linux/postrm"
-
-      - name: Set Package Names
-        run: |
-          echo "RPM_PACKAGE=$(basename out/*.rpm)" >> "$GITHUB_ENV"
-          echo "DEB_PACKAGE=$(basename out/*.deb)" >> "$GITHUB_ENV"
-
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
-        with:
-          name: ${{ env.RPM_PACKAGE }}
-          path: out/${{ env.RPM_PACKAGE }}
-
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
-        with:
-          name: ${{ env.DEB_PACKAGE }}
-          path: out/${{ env.DEB_PACKAGE }}
-
-  build-darwin:
-    needs: [get-go-version, get-product-version]
-    runs-on: ${{ endsWith(github.repository, '-enterprise') && fromJSON('["self-hosted", "ondemand", "macos"]') || 'macos-latest' }}
-    strategy:
-      matrix:
-        goos: [darwin]
-        goarch: ["arm64", "amd64"]
-      fail-fast: true
-
-    name: Go ${{ needs.get-go-version.outputs.go-version }} ${{ matrix.goos }} ${{ matrix.goarch }} build
-
-    steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-        with:
-          ref: ${{ github.event.inputs.build-ref }}
-
-      - uses: ./.github/actions/vault-secrets
-        with:
-          paths: |-
-            kv/data/github/hashicorp/nomad-enterprise/gha ELEVATED_GITHUB_TOKEN ;
-      - name: Git config token
-        if: endsWith(github.repository, '-enterprise')
-        run: git config --global url.'https://${{ env.ELEVATED_GITHUB_TOKEN }}@github.com'.insteadOf 'https://github.com'
-
-      - name: Setup go
-        uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
-        with:
-          go-version: ${{ needs.get-go-version.outputs.go-version }}
-
-      - name: Build dependencies
-        run: make deps
-
-      - name: Setup node and yarn
-        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
-        with:
-          node-version: "18"
-          cache-dependency-path: "ui/yarn.lock"
-
-      - name: Install Yarn
-        run: |
-          npm install -g yarn
-
-      - name: Build prerelease
-        run: make prerelease
-        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.make-prerelease == 'true' }}
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GO_TAGS: "${{ env.GO_TAGS }} netcgo"
-          CGO_ENABLED: 1
-        run: |
-          go clean -cache
-          make pkg/${{ matrix.goos }}_${{ matrix.goarch }}.zip
-          mv pkg/${{ matrix.goos }}_${{ matrix.goarch }}.zip ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
-        with:
-          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-          path: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-
-  build-docker:
-    name: Docker ${{ matrix.arch }} build
-    needs:
-      - get-product-version
-      - build-linux
-    runs-on: custom-linux-xxl-nomad-20.04
-    strategy:
-      matrix:
-        arch: ["arm64", "amd64"]
-    env:
-      version: ${{needs.get-product-version.outputs.product-version}}
-      revision: ${{github.sha}}
-    steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-      - name: Set revision
-        if: "${{ github.event.inputs.build-ref != '' }}"
-        run: |
-          echo "revision=${{ github.event.inputs.build-ref }}" >> "$GITHUB_ENV"
-      - name: Docker Build (Action)
-        uses: hashicorp/actions-docker-build@11d43ef520c65f58683d048ce9b47d6617893c9a # v2.0.0
-        with:
-          smoke_test: |
-            TEST_VERSION="$(docker run "${IMAGE_NAME}" version | awk '/Nomad v/{print $2}')"
-            if [ "${TEST_VERSION}" != "v${version}" ]; then
-              echo "Test FAILED"
-              exit 1
-            fi
-            echo "Test PASSED"
-          version: ${{env.version}}
-          revision: ${{env.revision}}
-          target: release
-          arch: ${{matrix.arch}}
-          tags: |
-            docker.io/hashicorp/${{env.PKG_NAME}}:${{env.version}}
-          dev_tags: |
-            docker.io/hashicorppreview/${{ env.PKG_NAME }}:${{ env.version }}-dev
-            docker.io/hashicorppreview/${{ env.PKG_NAME }}:${{ env.version }}-${{env.revision}}
-
-  minimum-os:
-    name: OS Compatibility
-    # A quick smoke test of our binaries on our minimum target OS (RHEL 7). Why RHEL 7? Because the glibc version is that old (2.17).
-    needs:
-      - get-go-version
-      - get-product-version
-      - build-linux
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      # Note: Ideally we'd test all our target archs, unfortunately availability of containers of these OS's vary.
-      # For instance there is no ubi7 image for arm64 (there is on ubi8), RHBZ#1728771. And none at all for arm.
-      # So we have to settle for only being able to validate where we can, which is just amd64.
-      matrix:
-        goos: [linux]
-        goarch: [amd64]
-    steps:
-      - uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
-        with:
-          go-version: ${{needs.get-go-version.outputs.go-version}}
-      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
-        with:
-          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-      - name: Test binary
-        env:
-          artifact_name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
-        run: |
-          echo "::group::Unpack and Prep"
-          docker pull registry.access.redhat.com/ubi7/ubi-minimal:7.9-1057
-          unzip "$artifact_name"
-          echo "::group::Diagnostics"
-          echo "CGO related build information:"
-          go version -m ./nomad | grep CGO
-          echo "GLIBC links:"
-          go tool nm ./nomad | grep -i glibc | cut -d @ -f 2-3 | sort --version-sort | uniq
-          echo "::group::Smoke test binary"
-          docker run --rm -v "$PWD:/src" registry.access.redhat.com/ubi7/ubi-minimal:7.9-1057 /src/nomad version
+          name: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_${{ matrix.goarch }}.zip
+          path: ${{ env.PKG_NAME }}_${{ needs.get-product-version.outputs.product-version }}_windows_${{ matrix.goarch }}.zip
 
 permissions:
   contents: read
